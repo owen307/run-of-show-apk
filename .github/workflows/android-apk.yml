@@ -1,0 +1,100 @@
+# Debug APK sideload. Phone handoff is app-arm64-v8a-debug.apk.
+# No Play signing. The debug keystore is the Android SDK default.
+
+name: Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    name: Debug APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Android SDK on the runner
+        run: |
+          if [ -d /usr/local/lib/android/sdk ]; then
+            SDK=/usr/local/lib/android/sdk
+          elif [ -n "${ANDROID_SDK_ROOT:-}" ]; then
+            SDK="$ANDROID_SDK_ROOT"
+          elif [ -n "${ANDROID_HOME:-}" ]; then
+            SDK="$ANDROID_HOME"
+          else
+            echo "Android SDK not found on the runner." >&2
+            exit 1
+          fi
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+
+      - name: Set up Flutter 3.47.6
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.47.6"
+          cache: true
+
+      - name: Accept Android licenses
+        run: yes | flutter doctor --android-licenses || true
+
+      - name: Fonts and launcher art
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pil
+          python3 tool/fetch_assets.py
+
+      - name: Dependencies
+        run: flutter pub get
+
+      - name: Analyze and test
+        run: |
+          flutter analyze
+          flutter test
+
+      - name: Debug APK, split per ABI
+        run: flutter build apk --debug --split-per-abi
+
+      - name: Upload run-of-show-android
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-of-show-android
+          path: build/app/outputs/flutter-apk/app-*-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Stage the arm64 package
+        run: |
+          mkdir -p dist
+          cp -f build/app/outputs/flutter-apk/app-arm64-v8a-debug.apk \
+            dist/run-of-show-arm64-debug.apk
+          sha256sum dist/run-of-show-arm64-debug.apk | tee dist/SHA256SUMS
+
+      - name: Publish the arm64 debug APK
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: debug-${{ github.sha }}
+          name: Run of Show arm64 debug APK
+          make_latest: true
+          files: |
+            dist/run-of-show-arm64-debug.apk
+            dist/SHA256SUMS
+          body: |
+            Debug sideload for arm64 phones. The app label is Run of Show.
+            Alpaca Link sends JSON to multicast 239.255.42.77:44771 with TTL 1.
+            source.app is run-of-show. Sending and clock.time default on.
