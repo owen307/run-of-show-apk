@@ -1,0 +1,45 @@
+name: Publish arm64 debug APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/release-source.url"
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Import source and publish v0.1.0
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -eu
+          source_url=$(sed -n '1p' .github/release-source.url | tr -d '[:space:]')
+          apk_url=$(sed -n '2p' .github/release-source.url | tr -d '[:space:]')
+          curl -fL -X POST "$source_url" -o /tmp/run-of-show-source.tar.gz
+          tar -xzf /tmp/run-of-show-source.tar.gz
+          git add -A
+          git rm -f --ignore-unmatch .github/release-source.url
+          rm -f .github/release-source.url
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "github-actions[bot]"
+          git commit -m "Publish Run of Show source [skip ci]"
+          git push
+          curl -fL -X POST "$apk_url" -o /tmp/run-of-show-arm64-debug.apk
+          echo "de6056cdd9161f2d61f235154ae38d1731681a22df93ec46129f01e83aad49f4  /tmp/run-of-show-arm64-debug.apk" | sha256sum -c -
+          gh release create v0.1.0 /tmp/run-of-show-arm64-debug.apk \
+            --target main \
+            --title "Run of Show v0.1.0" \
+            --notes "$(cat <<'EOF'
+          Run of Show 0.1.0 arm64 debug APK.
+
+          Install on an arm64 Android phone. The launcher name is Run of Show.
+
+          SHA-256: de6056cdd9161f2d61f235154ae38d1731681a22df93ec46129f01e83aad49f4
+          EOF
+          )"
